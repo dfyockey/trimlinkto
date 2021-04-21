@@ -1,0 +1,166 @@
+#!/usr/bin/perl -w
+
+my @help = <<manpage =~ m/(#.*\n)/g;
+# NAME
+#       trimlinkto - Trims 'Link to ' off of .desktop file links
+#
+# SYNOPSIS
+#       trimlinkto <caja_working_dir>
+#       trimlinkto [-h|-?]
+#
+# DESCRIPTION
+#       Links created in the Caja file manager are preappended with
+#       the text 'Link to '. When run as a Caja Action with %f as the
+#       parameter, this script trims 'Link to ' off of the names of
+#       all displayed filenames in the working directory specified by
+#       %f. Real filenames are not effected.
+#
+#       The caja-actions-config-tool (CACT) can be used to configure
+#       the Caja Action by setting the following in the Command
+#       section of the tool's Command tab (with full path to trimlinkto
+#       if needed):
+#               Path:              trimlinkto
+#               Parameters:        %f
+#               Working Directory: %d
+#       Additionally, the Execution mode on the tool's Execution tab
+#       should be set to Normal.
+#
+#       To automatically change the icon of each modified link to a
+#       specified icon use this feature in a Caja Action, replace the
+#       Parameters indicated above (using the linkicon of your choice)
+#       with:
+#               Parameters:        -i linkicon %f
+#
+#       The use of %f as the parameter to provide the working directory
+#       is not a mistake. %f is supposed to provide the "(first)
+#       filename", as stated in the CACT "Parameter Legend" (click the
+#       'Legend' button on the CACT Command tab to view). Further, %d is
+#       supposed to provide the "(first) base directory". However, when
+#       an Action is performed using a toolbar button or an item in the
+#       directory context menu, and %d or %f are used as parameters, %d
+#       provides the parent directory of the working directory, while %f
+#       provides the actual working directory.
+#
+#       caja_working_dir
+#           path to a directory in which .desktop file links
+#           preappended with 'Link to ' should be trimmed
+#
+#       -i <linkicon>
+#           icon to assign to modified .desktop file links
+#
+#       -h, -?
+#           display this help information
+#
+# AUTHOR
+#       Written by David Yockey
+#
+# HISTORY
+#       17 May 2019 - original completion
+#
+#       23 May 2019 - Major changes to add an icon option and to prevent
+#       modification of .desktop file links not directed to URLs or
+#       lacking the preappended 'Link to ' text.
+#
+# COPYRIGHT
+#       Copyright © 2019 David Yockey
+#
+# LICENSE
+#       The software is licensed under the MIT License.
+#       See the source code for license full text.
+#
+# SEE ALSO
+#       The caja-actions-config-tool is part of the caja-actions
+#       extension; check your distro repository for caja-actions;
+#       see https://github.com/raveit65/caja-actions for more
+#       information
+#
+#       caja(1)
+manpage
+
+# MIT License
+#
+# Copyright 2019 David Yockey
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files
+# (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+my $workingdir;
+my $linkicon;
+
+{ # Command line argument parser
+	while (defined($_ = shift)) {
+		/^[^-]/		&& do {	$workingdir = $_; last };
+		/^-i/		&& do { $linkicon = shift; next };
+		/^-h|^-?/	&& do { print "\n"; foreach (@help) {$_ =~ s/^# ?//; print "$_";} print "\n"; exit };
+	}
+}
+
+chdir($workingdir);
+while ($fn = glob "*.desktop" ) {
+	my $URLfound = 0;
+	my $LinkTofound = 0;
+
+	open (TMPFILE, ">/tmp/trimlinkto.tmp");
+	open (DESKTOPFILE, "$workingdir/$fn");
+
+	# Check for URL to determine if Icon should be changed
+	while (<DESKTOPFILE>) {
+		$URLfound = 1 if $_ =~ /^URL=/;
+	}
+	
+	if ( $URLfound ) {
+		# Rewind DESKTOPFILE (from https://stackoverflow.com/a/12043681/8100489)
+		seek DESKTOPFILE, 0, 0;
+
+		while (<DESKTOPFILE>) {
+			if ( $_ =~ /^Name(\[en-US])*=Link to / ) {
+				$_ =~ s/^(Name(\[en-US])*=)Link to /$1/;
+				$LinkTofound = 1;
+			}
+			print TMPFILE $_;
+		}
+	}
+	
+	close (DESKTOPFILE);
+	close (TMPFILE);
+	
+	if ( $LinkTofound ) {
+		if ( defined($linkicon) ) {
+			# Stream TMPFILE back to DESKTOPFILE, changing the icon along the way...
+			open (DESKTOPFILE, ">$workingdir/$fn");
+			open (TMPFILE, "/tmp/trimlinkto.tmp");
+			
+			while (<TMPFILE>) {
+				$_ =~ s/^(Icon=)mate-fs-bookmark$/$1$linkicon/;
+				print DESKTOPFILE $_;
+			}
+			
+			close (TMPFILE);
+			close (DESKTOPFILE);
+		} else {
+			# Copy TMPFILE back to DESKTOPFILE...
+			
+			# Used mv rather than Perl's rename to enable moving when
+			# /tmp is on a different device than the working directory
+			# without need for an additional module like File::Copy.
+			`mv -f /tmp/trimlinkto.tmp "$workingdir/$fn"`
+		}
+	}
+}
+
